@@ -1,14 +1,14 @@
-# Use an official Node.js runtime as the base image
-FROM node:18
+# Use an official Python runtime as the base image
+FROM python:3.10
 
 # Set the working directory in the container
 WORKDIR /usr/src/app
 
-# Copy package.json and package-lock.json to the working directory
-COPY package*.json ./
+# Copy requirements.txt to the working directory
+COPY requirements.txt ./
 
 # Install the application dependencies
-RUN npm install
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the rest of the application code to the working directory
 COPY . .
@@ -17,4 +17,4 @@ COPY . .
 EXPOSE 8888
 
 # Define the command to run your app
-CMD [ "node", "index.js" ]
+CMD ["python", "app.py"]
