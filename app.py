@@ -1,83 +1,104 @@
-from flask import Flask, jsonify
-from azure.storage.blob import BlobServiceClient
-from azure.communication.email import EmailClient
-from dotenv import load_dotenv
-import os
-#import asyncio
-import atexit
-import smtplib
-from email.mime.text import MIMEText
-from threading import Thread
-import time
+require("dotenv").config();
+const {
+  BlobServiceClient,
+  StorageSharedKeyCredential,
+} = require("@azure/storage-blob");
+const { EmailClient } = require("@azure/communication-email");
+const express = require("express");
+const bodyParser = require("body-parser");
+const app = express();
 
-# Load environment variables from .env file
-load_dotenv()
+// This code retrieves your connection string from an environment variable.
+console.log(process.env);
+const connectionString = process.env.EMAIL_URL;
+const client = new EmailClient(connectionString);
+// Enter your storage account name and shared key
+const account = process.env.STORAGE_ACCOUNT_NAME;
+const accountKey = process.env.STORAGE_ACCOUNT_KEY;
 
-app = Flask(__name__)
+// Use StorageSharedKeyCredential with storage account and account key
+// StorageSharedKeyCredential is only available in Node.js runtime, not in browsers
+const sharedKeyCredential = new StorageSharedKeyCredential(account, accountKey);
+const blobServiceClient = new BlobServiceClient(
+  `https://${account}.blob.core.windows.net`,
+  sharedKeyCredential
+);
 
-print(os.getenv("EMAIL_URL"))
+const containerName = "lab9";
+const port = process.env.PORT || 8888;
 
-# Azure Blob Storage configuration
-account_name = os.getenv("STORAGE_ACCOUNT_NAME")
-account_key = os.getenv("STORAGE_ACCOUNT_KEY")
-container_name = "lab9"
-blob_service_client = BlobServiceClient(
-    account_url=f"https://{account_name}.blob.core.windows.net",
-    credential=account_key
-)
+// middleware
+app.use(bodyParser.urlencoded({ extended: false }));
+app.use(bodyParser.json());
 
-# Azure Communication Email configuration
-email_connection_string = os.getenv("EMAIL_URL")
-email_client = EmailClient.from_connection_string(email_connection_string)
-# email_client = EmailClient(email_connection_string)
+async function sendEmail(address, count) {
+  const emailMessage = {
+    senderAddress:
+      "DoNotReply@d0b7c877-a2d0-4b93-bde3-0e75d84c2ab5.azurecomm.net",
+    content: {
+      subject: "Blob Notification",
+      plainText: `There is an change in the blob count ${count}`,
+    },
+    recipients: {
+      to: [{ address: address }],
+    },
+  };
 
-# Email sending function
-def send_email(address, count):
-     email_message = {
-        "senderAddress": "DoNotReply@4904e9fc-529c-44b9-a650-b0247c395169.azurecomm.net",
-        "recipients":  {
-            "to": [{"address": "prasadsb240801@gmail.com" }],
-        },
-        "content": {
-            "subject": "Test Email",
-            "plainText": "Hello world via email.",
-        }
+  const poller = await client.beginSend(emailMessage);
+  const result = await poller.pollUntilDone();
+  console.log("Result", result);
+}
+
+// first fetch all the data from the blob storage
+// check how many elements are there
+// store that data
+
+let initialCount = 0;
+let currentCount = 0;
+
+async function fetchBlobs() {
+  console.log("Function is called");
+  const containerClient = blobServiceClient.getContainerClient(containerName);
+
+  // need something to store the data
+  let tempData = [];
+
+  let blobs = containerClient.listBlobsFlat();
+  for await (const blob of blobs) {
+    ``;
+    tempData.push(blob.name);
+    console.log(`Blob: ${blob}`);
+    // send mail to the user
+    // sendEmail("jaidevv999@gmail.com");
+  }
+
+  return tempData;
+}
+
+fetchBlobs().then((data) => {
+  initialCount = data.length;
+});
+
+app.get("/", async (req, res) => {
+  let result = await fetchBlobs();
+
+  res.json({ result });
+});
+
+setInterval(() => {
+  fetchBlobs().then((data) => {
+    currentCount = data.length;
+    if (currentCount === initialCount) {
+      // do nothing
+      console.log("There is no change in the count");
+    } else {
+      console.log("We have to send the notification");
+      sendEmail("jaidevv999@gmail.com", currentCount);
+      initialCount = currentCount;
     }
+  });
+}, 2000);
 
-    poller = email_client.begin_send(email_message)
-    result = poller.result()
-    print("Result:", result)
-
-# Initialize blob count
-initial_count = 0
-
-def fetch_blobs():
-    container_client = blob_service_client.get_container_client(container_name)
-    blobs = container_client.list_blobs()
-    blob_names = [blob.name for blob in blobs]
-    return blob_names
-
-def check_blob_count():
-    global initial_count
-    while True:
-        current_blobs = fetch_blobs()
-        current_count = len(current_blobs)
-        if current_count != initial_count:
-            print("Blob count has changed. Sending notification...")
-            send_email("jaidevv999@gmail.com", current_count)
-            initial_count = current_count
-        else:
-             print("No change in blob count.")
-        time.sleep(2)
-
-@app.route('/')
-def index():
-    blobs = fetch_blobs()
-    return jsonify({"result": blobs})
-
-if __name__ == '__main__':
-    # Start background thread for checking blob count
-    thread = Thread(target=check_blob_count)
-    thread.daemon = True
-    thread.start()
-    app.run(port=int(os.getenv("PORT", 8888)))
+app.listen(port, () => {
+  console.log(`Server is running at http://localhost:${port}`);
+});
